@@ -1,12 +1,13 @@
 use crate::force_funcs::gravity;
 use macroquad::prelude::*;
+#[derive(Clone)]
 pub struct Point {
-    prev_pos: Vec2,
+    pub prev_pos: Vec2,
     pub pos: Vec2,
     pub vel: Vec2,
-    acc: Vec2,
+    pub acc: Vec2,
     pub mass: f32,
-    pinned: bool,
+    pub pinned: bool,
 }
 impl Point {
     pub fn new(x: f32, y: f32, mass: f32, pinned: bool) -> Point {

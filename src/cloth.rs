@@ -1,7 +1,11 @@
-use crate::force_funcs::damping_force;
 use crate::point::Point;
 use crate::stick::Stick;
 use macroquad::prelude::*;
+const SPRING_CONSTANT: f32 = 30.0; // Adjust for the desired stiffness.
+const DAMPING_CONSTANT: f32 = 0.10; // Start lower and increase if necessary.
+const TIME_STEP: f32 = 0.1; // Smaller time steps can improve stability.
+const GRAVITY: Vec2 = vec2(0.0, 9.81); // Assuming downward Y-axis.
+
 pub struct Cloth {
     width: usize,
     height: usize,
@@ -23,7 +27,7 @@ impl Cloth {
                 let pinned = y == 0 && x % 2 == 0;
                 row.push(Point::new(
                     (x as f32 * spacing) + center.x,
-                    (y as f32 * spacing) + (center.y / 2.5),
+                    (y as f32 * spacing) + (center.y),
                     1.0,
                     pinned,
                 ));
@@ -57,29 +61,82 @@ impl Cloth {
         }
     }
     pub fn update(&mut self) {
-        //update points
+        for stick in &self.sticks {
+            let point_a = &self.points[stick.p1_idx.1][stick.p1_idx.0];
+            let point_b = &self.points[stick.p2_idx.1][stick.p2_idx.0];
 
-        for row in &mut self.points {
-            for point in row {
-                point.update();
+            let displacement = point_a.pos - point_b.pos;
+            let displacement_length = displacement.length();
+
+            let direction = if displacement_length != 0.0 {
+                displacement / displacement_length
+            } else {
+                vec2(0.0, 0.0) // or some other fallback value
+            };
+
+            let force_magnitude = -SPRING_CONSTANT * (displacement_length - stick.rest_length);
+            let force = direction * force_magnitude;
+
+            {
+                let mut point_a_mut = &mut self.points[stick.p1_idx.1][stick.p1_idx.0];
+                if !point_a_mut.pinned {
+                    point_a_mut.acc += force;
+                }
+            }
+            {
+                let mut point_b_mut = &mut self.points[stick.p2_idx.1][stick.p2_idx.0];
+
+                if !point_b_mut.pinned {
+                    point_b_mut.acc -= force;
+                }
             }
         }
-        for stick in &mut self.sticks {
-            stick.update(&mut self.points);
-        }
+        // Now, iterate through each point to apply gravity, damping, and perform the Verlet integration
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let mut point = &mut self.points[y][x];
 
-        //damping force needs to be applied last because
-        //it is dependent on the velocity of the points
-        //after the spring force has been applied
-        for row in &mut self.points {
-            for point in row {
-                point.apply_force(damping_force(point));
+                if !point.pinned {
+                    point.acc += GRAVITY; // Add gravity
+
+                    let velocity = (point.pos - point.prev_pos) / TIME_STEP;
+                    let damping_force = -DAMPING_CONSTANT * velocity;
+                    point.acc += damping_force; // Add damping
+
+                    // Verlet integration
+                    let new_position =
+                        2.0 * point.pos - point.prev_pos + point.acc * TIME_STEP * TIME_STEP;
+
+                    point.prev_pos = point.pos;
+                    point.pos = new_position;
+
+                    // Reset acceleration for next iteration
+                    point.acc = vec2(0.0, 0.0);
+                }
             }
         }
+        for stick in &self.sticks {
+            let point_a = &self.points[stick.p1_idx.1][stick.p1_idx.0];
+            let point_b = &self.points[stick.p2_idx.1][stick.p2_idx.0];
 
-        for row in &mut self.points {
-            for point in row {
-                point.apply();
+            let delta = point_b.pos - point_a.pos;
+            let delta_length = delta.length();
+            let difference = if delta_length != 0.0 {
+                (delta_length - stick.rest_length) / delta_length
+            } else {
+                0.0
+            };
+
+            let adjustment = delta * 0.5 * difference;
+
+            let point_a = &mut self.points[stick.p1_idx.1][stick.p1_idx.0];
+            if !point_a.pinned {
+                point_a.pos += adjustment;
+            }
+
+            let point_b = &mut self.points[stick.p2_idx.1][stick.p2_idx.0];
+            if !point_b.pinned {
+                point_b.pos -= adjustment;
             }
         }
     }
